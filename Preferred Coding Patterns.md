@@ -61,3 +61,37 @@ xFunc = CLng(analyteDef(1))
 - Avoid introducing temporary variables when a value can be used directly and read clearly.
 - Add locals when they materially improve readability (for example very long names, repeated expressions, or complex range arguments).
 - Respect `ByRef`/`ByVal` intent in signatures; direct use of class attributes inside methods is preferred unless a local variable is clearly better.
+- **Assign class attributes directly** (`Set obj.tbl = ExcelSteps.New_tbl`) rather than creating a proxy local variable first and assigning the attribute at the end. When a ByRef call requires a local handle (VBA quirk: class attribute cannot be passed directly as ByRef), create a minimal local pointing to the already-set attribute and omit the redundant final reassignment:
+```vb
+' Preferred - attribute set first; local only for ByRef call
+Set import.tblRawBR = ExcelSteps.New_tbl
+Set tblRaw = import.tblRawBR
+If Not tblRaw.Provision(tblRaw, wkbk, False) Then GoTo ErrorExit
+
+' Avoid - proxy local obscures that tblRawBR is the real target
+Set tempTbl = ExcelSteps.New_tbl
+If Not tempTbl.Provision(tempTbl, wkbk, False) Then GoTo ErrorExit
+Set import.tblRawBR = tempTbl
+```
+
+11. Prompt for user input in the driver sub, not in context initialization methods.
+- File pickers and any user-interactive calls belong in the driver sub, executed before calling the context initialization procedure. This keeps initialization methods independent of production/test mode and trivially testable.
+- In the driver, prompt for the file, split into path and filename, and set the class attributes before calling the procedure.
+- In tests, declare file names as module-level `Const` values at the top of the test module. Set `import.pathData` and the filename attribute directly in the test or helper sub using those constants.
+```vb
+' In the driver sub (production):
+pfFull = GetRawDataFilename()
+sep = Application.PathSeparator
+lastSep = InStrRev(pfFull, sep)
+import.pathData = Left(pfFull, lastSep - 1) & sep
+import.fBRRaw = Mid(pfFull, lastSep + 1)
+If Not import.ImportBRMetricsProcedure(import, mdls, tbls) Then GoTo ErrorExit
+
+' In the test module (module-level constant):
+Const fileBRRaw As String = "BRImport_raw.xlsx"
+
+' In the test or helper sub:
+import.pathData = tst.wkbkTest.Path & sep & "test_data" & sep
+import.fBRRaw = fileBRRaw
+tst.Assert tst, import.OpenAndNormalizeSourceProcedure(import)
+```
